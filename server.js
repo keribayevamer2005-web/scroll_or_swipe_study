@@ -223,7 +223,22 @@ const api = {
     };
 
     saveSession(session);
-    return { code: 200, _id: id, condition: session.condition, msg: 'ok' };
+
+    // The questionnaire stores this reply as its session record and
+    // reads fields back from it later. The original PHP returned
+    // the shape below, noted in a comment in the page source:
+    //   {code, _id, prolific_id, ip, condition, question_id}
+    // Returning less than that leaves fields undefined further on,
+    // so the whole record is sent back.
+    return {
+      code: 200,
+      _id: id,
+      prolific_id: session.prolific_id,
+      ip: session.ip,
+      condition: session.condition,
+      question_id: 0,
+      msg: 'ok',
+    };
   },
 
   /** Survey site: the participant is about to start the browsing task. */
