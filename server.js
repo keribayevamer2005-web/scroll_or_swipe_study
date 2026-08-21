@@ -270,10 +270,28 @@ const api = {
     return { code: 200, condition: assignCondition(study), msg: 'no session' };
   },
 
-  /** Task site: a batch of scrolls, taps and page views. */
+  /**
+   * Task site: a batch of scrolls, taps and page views.
+   *
+   * The events arrive under user_recorder as a JSON string rather
+   * than as an array, so the text is parsed before storing. The
+   * other field names are accepted too, in case a build differs.
+   */
   toshopstatistics(body, req) {
     const study = studyFromRequest(req, body) || 'unknown';
-    const events = body.statisticsALineList || body.list || body.events;
+
+    let events = body.statisticsALineList || body.list || body.events;
+
+    if (!events && typeof body.user_recorder === 'string') {
+      try {
+        events = JSON.parse(body.user_recorder);
+      } catch (e) {
+        console.warn('could not read user_recorder');
+      }
+    } else if (!events && Array.isArray(body.user_recorder)) {
+      events = body.user_recorder;
+    }
+
     saveEvents(body._id || 'anonymous', study, events);
     return { code: 200, msg: 'ok' };
   },
@@ -531,7 +549,13 @@ function buildCsv(study) {
     const answers = new Map();
     if (Array.isArray(s.survey)) {
       for (const a of s.survey) {
-        if (a && a.qid != null) answers.set(String(a.qid), a.value ?? a.v ?? '');
+        // The questionnaire stores the chosen number under
+        // question_value; the other names are accepted in case a
+        // build differs.
+        if (a && a.qid != null) {
+          const value = a.question_value ?? a.value ?? a.v ?? '';
+          answers.set(String(a.qid), value);
+        }
       }
     }
 
