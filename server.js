@@ -292,6 +292,29 @@ const api = {
     return { code: 200, msg: 'ok' };
   },
 
+  /**
+   * The cart sends the same thing under this name when the
+   * participant presses Confirm.
+   *
+   * The order and quantity arrive as arrays here rather than as
+   * comma separated text, so they are joined before storing and
+   * the two routes end up with identical records.
+   */
+  toshopback(body) {
+    const session = sessions.get(body._id);
+    if (!session) return { code: 404, msg: 'unknown session' };
+
+    const flatten = (value) =>
+      Array.isArray(value) ? value.join(',') : value != null ? String(value) : null;
+
+    session.order = flatten(body.order) ?? session.order;
+    session.quantity = flatten(body.quantity) ?? session.quantity;
+    session.browsing_end_time =
+      Number(body.browsing_end_time) || Date.now();
+    saveSession(session);
+    return { code: 200, msg: 'ok' };
+  },
+
   /** Survey site: the answers to the scale questions. */
   toallquestionaire(body) {
     const session = sessions.get(body._id);
@@ -324,6 +347,16 @@ const api = {
     saveSession(session);
 
     return { code: 200, msg: 'ok', completion_code: 'DEMO' };
+  },
+
+  /**
+   * The same thing in the photography studies.
+   *
+   * Those pages use their own name for the demographics step
+   * (fengjing means scenery), but send the same content.
+   */
+  postformfengjing(body) {
+    return api.postform(body);
   },
 };
 
