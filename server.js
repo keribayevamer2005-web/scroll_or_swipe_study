@@ -287,6 +287,18 @@ const api = {
     return { code: 200, msg: 'ok' };
   },
 
+  /**
+   * The same thing under a different name.
+   *
+   * The questionnaire pages send their answers to an address of
+   * the form api.php?action=user_question rather than to the
+   * endpoint above. Both carry the same content, so this simply
+   * passes the request on.
+   */
+  user_question(body) {
+    return api.toallquestionaire(body);
+  },
+
   /** Survey site: age, gender, and the end of the session. */
   postform(body) {
     const session = sessions.get(body._id);
@@ -516,9 +528,9 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
-  // The original sites call addresses ending in the endpoint name,
-  // for example /php/public/index.php/getcondition, so the last
-  // part of the path is what identifies the request.
+  // Обращения приходят на /api/<имя>. Старые сборки использовали
+  // длинный путь вида /php/public/index.php/<имя>, поэтому имя
+  // берётся из последней части адреса и оба варианта работают.
   const endpoint = pathname.split('/').filter(Boolean).pop();
 
   if (endpoint && Object.prototype.hasOwnProperty.call(api, endpoint)) {
