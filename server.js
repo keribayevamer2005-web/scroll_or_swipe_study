@@ -406,6 +406,72 @@ function serveFile(res, urlPath) {
 // ------------------------------------------------------------
 // Export and admin
 // ------------------------------------------------------------
+/**
+ * Browsing distance, the mediator reported in the paper.
+ *
+ * The paper counts the movements a participant makes through the
+ * assortment: each step from one item to the next is one movement,
+ * including steps back to something already seen.
+ *
+ * Every scroll event carries the scroll position and the size of a
+ * single item, so dividing one by the other converts pixels into a
+ * position within the list. Summing the changes between successive
+ * events gives the distance travelled. Vertical conditions use the
+ * height, horizontal ones the width.
+ *
+ * Checked against the published Study 2 dataset by recomputing the
+ * measure for 185 participants: the averages agree closely (54.6
+ * reported against 55.8 recomputed), while individual values differ
+ * by around nine per cent. The measure is therefore reproduced in
+ * form rather than exactly, which is enough for a new collection
+ * where every participant is measured the same way, but it will not
+ * reproduce the earlier numbers to the decimal.
+ */
+function browsingDistance(events) {
+  let total = 0;
+  let previous = null;
+
+  for (const e of events) {
+    const height = Number(e.commodityheight);
+    const top = Number(e.scrollTop);
+    const width = Number(e.commodityWidth);
+    const left = Number(e.scrollLeft);
+
+    let position = null;
+    if (height > 0 && Number.isFinite(top)) {
+      position = top / height;          // vertical conditions
+    } else if (width > 0 && Number.isFinite(left)) {
+      position = left / width;          // horizontal conditions
+    }
+    if (position === null) continue;
+
+    if (previous !== null) total += Math.abs(position - previous);
+    previous = position;
+  }
+
+  return Math.round(total * 100) / 100;
+}
+
+/** Scroll events for each session, read back from the events file. */
+function loadEventsBySession() {
+  const bySession = new Map();
+  if (!fs.existsSync(EVENTS_FILE)) return bySession;
+
+  for (const line of fs.readFileSync(EVENTS_FILE, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const row = JSON.parse(line);
+      const event = row.event || {};
+      if (event.type !== 'scroll') continue;
+      if (!bySession.has(row._id)) bySession.set(row._id, []);
+      bySession.get(row._id).push(event);
+    } catch (e) {
+      /* skip unreadable line */
+    }
+  }
+  return bySession;
+}
+
 function csvCell(value) {
   if (value == null) return '';
   const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
@@ -438,15 +504,25 @@ function buildCsv(study) {
 
   const qList = [...questionIds].sort((a, b) => Number(a) - Number(b));
   const dList = [...demoFields].sort();
+  const eventsBySession = loadEventsBySession();
 
+  // The first columns carry the names used in the paper, so the file
+  // lines up with the published datasets without renaming by hand:
+  //   IV   navigation condition
+  //   DV1  variety of products chosen (number of distinct items)
+  //   DV2  total quantity chosen
+  //   ME   browsing distance
+  // The columns after them hold the underlying values, kept so that
+  // anything can be recomputed or checked.
   const header = [
-    '_id', 'study', 'prolific_id', 'condition',
+    'Prolific_id', 'Study', 'IV', 'condition_code',
+    'DV1', 'DV2', 'ME',
+    ...qList.map((q) => 'Q' + q),
+    ...dList,
+    '_id', 'Date',
     'start_time', 'end_time', 'duration_ms',
     'browsing_start_time', 'browsing_end_time', 'browsing_duration_ms',
-    'order', 'quantity', 'n_products', 'total_quantity',
-    ...qList.map((q) => 'q' + q),
-    ...dList,
-    'user_agent',
+    'order', 'quantity', 'user_agent',
   ];
 
   const lines = [header.join(',')];
@@ -463,18 +539,29 @@ function buildCsv(study) {
     const qtyList = s.quantity ? String(s.quantity).split(',').filter(Boolean) : [];
     const totalQty = qtyList.reduce((sum, n) => sum + (Number(n) || 0), 0);
 
+    // Navigation direction as the paper reports it, worked out from
+    // the condition code, since the numbering differs between studies.
+    const label = (STUDIES[s.study] || { conditions: {} }).conditions[s.condition];
+    const direction = label
+      ? (label.startsWith('v') ? 'Scrolling' : 'Swiping')
+      : '';
+
+    const distance = browsingDistance(eventsBySession.get(s._id) || []);
+
     const line = [
-      s._id, s.study, s.prolific_id, s.condition,
+      s.prolific_id, s.study, direction, s.condition,
+      orderList.length || '', totalQty || '', distance || '',
+      ...qList.map((q) => (answers.has(q) ? answers.get(q) : '')),
+      ...dList.map((f) => (s.demographics ? s.demographics[f] : '')),
+      s._id,
+      s.start_time ? new Date(s.start_time).toISOString().slice(0, 10) : '',
       s.start_time, s.end_time,
       s.end_time && s.start_time ? s.end_time - s.start_time : '',
       s.browsing_start_time, s.browsing_end_time,
       s.browsing_end_time && s.browsing_start_time
         ? s.browsing_end_time - s.browsing_start_time
         : '',
-      s.order, s.quantity, orderList.length, totalQty || '',
-      ...qList.map((q) => (answers.has(q) ? answers.get(q) : '')),
-      ...dList.map((f) => (s.demographics ? s.demographics[f] : '')),
-      s.user_agent,
+      s.order, s.quantity, s.user_agent,
     ];
 
     lines.push(line.map(csvCell).join(','));
