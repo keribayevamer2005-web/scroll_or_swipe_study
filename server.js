@@ -448,6 +448,7 @@ function serveFile(res, urlPath) {
 function browsingDistance(events) {
   let total = 0;
   let previous = null;
+  let usedFallback = false;
 
   for (const e of events) {
     const height = Number(e.commodityheight);
@@ -460,6 +461,20 @@ function browsingDistance(events) {
       position = top / height;          // vertical conditions
     } else if (width > 0 && Number.isFinite(left)) {
       position = left / width;          // horizontal conditions
+    } else if (e.commodityStartInView != null && e.commodityStartInView !== '') {
+      // Some builds measure the item size through an asynchronous
+      // lookup that often has not finished when the event is
+      // recorded, leaving the size at zero. Those builds still list
+      // which items were on screen, so the first of them is used as
+      // the position instead. Slightly coarser, but available.
+      const visible = String(e.commodityStartInView)
+        .split(',')
+        .map(Number)
+        .filter(Number.isFinite);
+      if (visible.length) {
+        position = Math.min(...visible);
+        usedFallback = true;
+      }
     }
     if (position === null) continue;
 
@@ -467,7 +482,10 @@ function browsingDistance(events) {
     previous = position;
   }
 
-  return Math.round(total * 100) / 100;
+  return {
+    value: Math.round(total * 100) / 100,
+    approximate: usedFallback,
+  };
 }
 
 /** Scroll events for each session, read back from the events file. */
@@ -540,7 +558,7 @@ function buildCsv(study) {
     '_id', 'Date',
     'start_time', 'end_time', 'duration_ms',
     'browsing_start_time', 'browsing_end_time', 'browsing_duration_ms',
-    'order', 'quantity', 'user_agent',
+    'order', 'quantity', 'n_events', 'ME_approximate', 'user_agent',
   ];
 
   const lines = [header.join(',')];
@@ -570,11 +588,12 @@ function buildCsv(study) {
       ? (label.startsWith('v') ? 'Scrolling' : 'Swiping')
       : '';
 
-    const distance = browsingDistance(eventsBySession.get(s._id) || []);
+    const events = eventsBySession.get(s._id) || [];
+    const distance = browsingDistance(events);
 
     const line = [
       s.prolific_id, s.study, direction, s.condition,
-      orderList.length || '', totalQty || '', distance || '',
+      orderList.length || '', totalQty || '', distance.value || '',
       ...qList.map((q) => (answers.has(q) ? answers.get(q) : '')),
       ...dList.map((f) => (s.demographics ? s.demographics[f] : '')),
       s._id,
@@ -585,7 +604,8 @@ function buildCsv(study) {
       s.browsing_end_time && s.browsing_start_time
         ? s.browsing_end_time - s.browsing_start_time
         : '',
-      s.order, s.quantity, s.user_agent,
+      s.order, s.quantity, events.length, distance.approximate ? 1 : 0,
+      s.user_agent,
     ];
 
     lines.push(line.map(csvCell).join(','));
