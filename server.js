@@ -453,30 +453,35 @@ function serveFile(res, urlPath) {
 // Export and admin
 // ------------------------------------------------------------
 /**
- * Browsing distance, the mediator reported in the paper.
+ * The browsing measures reported in the paper.
  *
- * The paper counts the movements a participant makes through the
- * assortment: each step from one item to the next is one movement,
- * including steps back to something already seen.
+ * The authors' own Study 4 dataset shows how these were built:
+ * movement through the assortment is split into the part spent
+ * going forward and the part spent going back, alongside counts of
+ * how many separate movements were made and how many items came
+ * into view. All of them are produced here rather than one, since
+ * the paper's mediator is reported as a single number and it is
+ * safer to supply the whole set than to guess which it was.
  *
- * Every scroll event carries the scroll position and the size of a
- * single item, so dividing one by the other converts pixels into a
- * position within the list. Summing the changes between successive
- * events gives the distance travelled. Vertical conditions use the
- * height, horizontal ones the width.
+ *   forward   distance travelled deeper into the list, in items
+ *   backward  distance travelled back towards the start, in items
+ *   total     the two added together
+ *   moves     how many separate movements were made
+ *   items     how many different items were seen
  *
- * Checked against the published Study 2 dataset by recomputing the
- * measure for 185 participants: the averages agree closely (54.6
- * reported against 55.8 recomputed), while individual values differ
- * by around nine per cent. The measure is therefore reproduced in
- * form rather than exactly, which is enough for a new collection
- * where every participant is measured the same way, but it will not
- * reproduce the earlier numbers to the decimal.
+ * Position within the list comes from the scroll position divided
+ * by the size of one item: height in the vertical conditions,
+ * width in the horizontal ones. Where a build failed to measure the
+ * item size, the list of items on screen is used instead, which is
+ * coarser but available.
  */
-function browsingDistance(events) {
-  let total = 0;
+function browsingMeasures(events) {
+  let forward = 0;
+  let backward = 0;
+  let moves = 0;
   let previous = null;
-  let usedFallback = false;
+  let approximate = false;
+  const itemsSeen = new Set();
 
   for (const e of events) {
     const height = Number(e.commodityheight);
@@ -484,35 +489,52 @@ function browsingDistance(events) {
     const width = Number(e.commodityWidth);
     const left = Number(e.scrollLeft);
 
+    // Record which items were on screen, however position is read.
+    for (const field of ['commodityStartInView', 'commodityEndInView']) {
+      if (e[field] != null && e[field] !== '') {
+        String(e[field])
+          .split(',')
+          .map(Number)
+          .filter(Number.isFinite)
+          .forEach((n) => itemsSeen.add(n));
+      }
+    }
+
     let position = null;
     if (height > 0 && Number.isFinite(top)) {
-      position = top / height;          // vertical conditions
+      position = top / height;
     } else if (width > 0 && Number.isFinite(left)) {
-      position = left / width;          // horizontal conditions
+      position = left / width;
     } else if (e.commodityStartInView != null && e.commodityStartInView !== '') {
-      // Some builds measure the item size through an asynchronous
-      // lookup that often has not finished when the event is
-      // recorded, leaving the size at zero. Those builds still list
-      // which items were on screen, so the first of them is used as
-      // the position instead. Slightly coarser, but available.
       const visible = String(e.commodityStartInView)
         .split(',')
         .map(Number)
         .filter(Number.isFinite);
       if (visible.length) {
         position = Math.min(...visible);
-        usedFallback = true;
+        approximate = true;
       }
     }
     if (position === null) continue;
 
-    if (previous !== null) total += Math.abs(position - previous);
+    if (previous !== null) {
+      const step = position - previous;
+      if (step > 0) forward += step;
+      else if (step < 0) backward += -step;
+      if (step !== 0) moves += 1;
+    }
     previous = position;
   }
 
+  const round = (n) => Math.round(n * 100) / 100;
+
   return {
-    value: Math.round(total * 100) / 100,
-    approximate: usedFallback,
+    forward: round(forward),
+    backward: round(backward),
+    total: round(forward + backward),
+    moves: moves,
+    items: itemsSeen.size,
+    approximate: approximate,
   };
 }
 
@@ -581,6 +603,9 @@ function buildCsv(study) {
   const header = [
     'Prolific_id', 'Study', 'IV', 'condition_code',
     'DV1', 'DV2', 'ME',
+    'browsingdistance_forward', 'browsingdistance_backward',
+    'browsingtotaldistance', 'scrollingtotalnumber',
+    'numberofbrowsedproducts',
     ...qList.map((q) => 'Q' + q),
     ...dList,
     '_id', 'Date',
@@ -618,11 +643,12 @@ function buildCsv(study) {
       : '';
 
     const events = eventsBySession.get(s._id) || [];
-    const distance = browsingDistance(events);
+    const m = browsingMeasures(events);
 
     const line = [
       s.prolific_id, s.study, direction, s.condition,
-      orderList.length || '', totalQty || '', distance.value || '',
+      orderList.length || '', totalQty || '', m.moves || '',
+      m.forward, m.backward, m.total, m.moves, m.items,
       ...qList.map((q) => (answers.has(q) ? answers.get(q) : '')),
       ...dList.map((f) => (s.demographics ? s.demographics[f] : '')),
       s._id,
@@ -633,7 +659,7 @@ function buildCsv(study) {
       s.browsing_end_time && s.browsing_start_time
         ? s.browsing_end_time - s.browsing_start_time
         : '',
-      s.order, s.quantity, events.length, distance.approximate ? 1 : 0,
+      s.order, s.quantity, events.length, m.approximate ? 1 : 0,
       s.condition_forced ? 1 : 0, s.user_agent,
     ];
 
