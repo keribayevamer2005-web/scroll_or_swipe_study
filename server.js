@@ -198,8 +198,7 @@ function studyFromRequest(req, body) {
 // ------------------------------------------------------------
 // The seven endpoints
 // ------------------------------------------------------------
-const api = {
-  /** Survey site: a participant has entered their Prolific ID. */
+const api = {  /** Survey site: a participant has entered their Prolific ID. */
   registeredid(body, req) {
     const study = studyFromRequest(req, body) || 'study1';
     const id = newId();
@@ -712,12 +711,25 @@ const server = http.createServer(async (req, res) => {
   // берётся из последней части адреса и оба варианта работают.
   const endpoint = pathname.split('/').filter(Boolean).pop();
 
-  if (endpoint && Object.prototype.hasOwnProperty.call(api, endpoint)) {
+  // Некоторые студии обращаются к тем же адресам с числовым
+  // суффиксом, например registeredid01 вместо registeredid.
+  // Суффикс отбрасывается, чтобы такие вызовы попадали к тому же
+  // обработчику и не приходилось заводить копию под каждый.
+  const handlerName =
+    endpoint && Object.prototype.hasOwnProperty.call(api, endpoint)
+      ? endpoint
+      : endpoint && Object.prototype.hasOwnProperty.call(
+          api, String(endpoint).replace(/\d+$/, '')
+        )
+      ? String(endpoint).replace(/\d+$/, '')
+      : null;
+
+  if (handlerName) {
     const body = await readBody(req);
     try {
-      return sendJson(res, api[endpoint](body, req));
+      return sendJson(res, api[handlerName](body, req));
     } catch (err) {
-      console.error(endpoint + ' failed:', err);
+      console.error(handlerName + ' failed:', err);
       return sendJson(res, { code: 500, msg: 'server error' }, 500);
     }
   }
