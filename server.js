@@ -124,9 +124,12 @@ function saveEvents(id, study, events) {
 function assignCondition(study) {
   const available = Object.keys(STUDIES[study].conditions).map(Number);
 
+  // Сессии, где условие задано ссылкой, в подсчёт не входят:
+  // иначе проверочные заходы перекосили бы распределение
+  // настоящих участников.
   const counts = new Map(available.map((c) => [c, 0]));
   for (const s of sessions.values()) {
-    if (s.study === study && counts.has(s.condition)) {
+    if (s.study === study && !s.condition_forced && counts.has(s.condition)) {
       counts.set(s.condition, counts.get(s.condition) + 1);
     }
   }
@@ -195,6 +198,31 @@ function studyFromRequest(req, body) {
   return match ? match[1] : null;
 }
 
+/**
+ * A condition asked for in the page address, or null.
+ *
+ * The syndicated link for a study assigns a condition automatically
+ * and evenly. The separate per-condition links carry the condition
+ * in the address instead, as in /study1/?c=2, so that one particular
+ * version can be opened on purpose.
+ *
+ * The value is read from the address of the page the request came
+ * from, which means the websites themselves need no changes: they
+ * simply ask for a condition as they always did, and the answer
+ * depends on how the participant arrived.
+ */
+function requestedCondition(req, study) {
+  const referer = req.headers.referer || '';
+  const match = referer.match(/[?&](?:c|condition)=(\d)/);
+  if (!match) return null;
+
+  const asked = Number(match[1]);
+  const allowed = Object.keys(
+    (STUDIES[study] || { conditions: {} }).conditions
+  ).map(Number);
+  return allowed.includes(asked) ? asked : null;
+}
+
 // ------------------------------------------------------------
 // The seven endpoints
 // ------------------------------------------------------------
@@ -207,7 +235,8 @@ const api = {  /** Survey site: a participant has entered their Prolific ID. */
       _id: id,
       study: study,
       prolific_id: String(body.prolific_id || '').trim(),
-      condition: assignCondition(study),
+      condition: requestedCondition(req, study) ?? assignCondition(study),
+      condition_forced: requestedCondition(req, study) != null,
       start_time: Number(body.start_time) || Date.now(),
       end_time: null,
       ip: clientIp(req),
@@ -557,7 +586,8 @@ function buildCsv(study) {
     '_id', 'Date',
     'start_time', 'end_time', 'duration_ms',
     'browsing_start_time', 'browsing_end_time', 'browsing_duration_ms',
-    'order', 'quantity', 'n_events', 'ME_approximate', 'user_agent',
+    'order', 'quantity', 'n_events', 'ME_approximate', 'condition_forced',
+    'user_agent',
   ];
 
   const lines = [header.join(',')];
@@ -604,7 +634,7 @@ function buildCsv(study) {
         ? s.browsing_end_time - s.browsing_start_time
         : '',
       s.order, s.quantity, events.length, distance.approximate ? 1 : 0,
-      s.user_agent,
+      s.condition_forced ? 1 : 0, s.user_agent,
     ];
 
     lines.push(line.map(csvCell).join(','));
