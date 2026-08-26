@@ -1,63 +1,131 @@
 /* ============================================================
- * layout-fix.css
+ * layout-fix.css  —  подключается ПОСЛЕ основного стиля
  * ------------------------------------------------------------
- * Frees up vertical space so the add-to-cart button and the
- * heart icon are not hidden behind the bar at the foot of the
- * screen, and removes the lines that make the card read as a
- * table.
+ * Карточка товара занимает всю высоту экрана, свободное место
+ * делится поровну над и под изображением, а кнопка добавления
+ * не уходит под панель корзины.
  *
- * The picture itself is deliberately left alone. An earlier
- * attempt capped its height, which collapsed the element and
- * the picture disappeared: uni-app wraps images in its own
- * containers and a height limit on the inner element does not
- * survive that. Space is reclaimed from the padding and the
- * empty spacer blocks around the picture instead, which is
- * both safer and enough.
+ * Размеры самого изображения не трогаются. В сборке uni-app
+ * тег <image> превращается не в <img>, а в собственный элемент
+ * с картинкой в фоне вложенного блока. Ограничение высоты на
+ * нём создаёт круговую зависимость: вложенный блок считает свои
+ * сто процентов от родителя, которому высоту как раз и
+ * ограничивают. Браузер разрешает её нулём, и изображение
+ * исчезает. Именно это произошло при первой попытке.
+ *
+ * Вторая попытка задавала распоркам жёсткий потолок в десять
+ * пикселей. Изображение вернулось, но снизу появилась пустота:
+ * одну фиксированную высоту сменили на другую, и остаток экрана
+ * оказалось некому занять.
+ *
+ * Здесь распоркам сказано делить остаток между собой. Это
+ * повторяет замысел исходного кода, но без привязки к числу
+ * windowHeight, которое на телефоне меняется при сворачивании
+ * адресной строки.
+ *
+ * Приём с удвоением класса (.uni-card.uni-card) поднимает вес
+ * правила до уровня исходных, где к классу добавлен атрибут
+ * сборки вида [data-v-44c0d81e]. Так правило выигрывает по
+ * порядку следования, и знать этот код не нужно. Пометка
+ * !important нужна отдельно: она перебивает стили, которые
+ * страница проставляет из скрипта.
  * ============================================================ */
 
-/* ---- 1. The empty blocks above and below the picture -------
- * The page inserts two spacer views whose height is worked out
- * from the window size, roughly 45% of whatever is left after
- * 395 pixels. On a normal phone that is a large gap at the top
- * and another at the bottom, which is what pushes the button
- * off the screen. A small fixed maximum keeps the layout tidy
- * without removing the breathing room entirely.
+:root {
+  --cart-bar-h: 60px;   /* высота нижней панели корзины */
+  --card-gap: 10px;     /* отступ карточки от краёв */
+}
+
+/* ---- 1. Сквозная высота от корня до контейнера прокрутки ---
+ * Без этого карточка не может растянуться: у неё стоит flex: 1,
+ * но родителю неоткуда взять высоту, и цепочка обрывается.
  */
-.box-side {
-  max-height: 10px !important;
-  min-height: 0 !important;
+html, body,
+uni-app, uni-page, uni-page-wrapper, uni-page-body {
+  height: 100%;
 }
 
-/* ---- 2. Padding around the card ---------------------------
- * The card sits inside a margin, its own padding, and then the
- * content's padding again. Trimming these gives back around
- * forty pixels of height on a phone.
+uni-page-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+uni-scroll-view {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+uni-scroll-view > .uni-scroll-view {
+  height: 100%;
+}
+
+/* ---- 2. Лента и её элемент ---------------------------------- */
+.scroll-view_H.scroll-view_H,
+.scroll-view_V.scroll-view_V {
+  height: 100% !important;
+}
+
+.scroll-view-item_H.scroll-view-item_H,
+.scroll-view-item_V.scroll-view-item_V {
+  height: 100% !important;
+  vertical-align: top !important;
+  align-items: stretch !important;
+}
+
+/* ---- 3. Карточка на всю высоту, низ отдан панели корзины ----
+ * Единица dvh учитывает сворачивание адресной строки; для
+ * браузеров без её поддержки остаётся обычная vh.
  */
-.uni-card {
-  margin: 4px !important;
-  padding: 0 4px !important;
-}
-
-.uni-card .uni-card__content {
-  padding: 4px !important;
-}
-
-.uni-card .uni-card__header {
-  padding: 6px 4px !important;
-}
-
-/* ---- 3. The lines that look like a table ------------------
- * The card draws a border and a shadow, and its header and
- * action row each draw a dividing line. Together these read as
- * a three-row table, which is what the review pointed out.
- */
-.uni-card,
-.uni-card--border,
-.uni-card--shadow {
+.uni-card.uni-card {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-height: calc(100vh - 2 * var(--card-gap)) !important;
+  box-sizing: border-box !important;
+  padding-bottom: calc(var(--cart-bar-h) + env(safe-area-inset-bottom, 0px)) !important;
   border: none !important;
   box-shadow: none !important;
 }
 
+@supports (height: 100dvh) {
+  .uni-card.uni-card {
+    min-height: calc(100dvh - 2 * var(--card-gap)) !important;
+  }
+}
+
+.uni-card .uni-card__content {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* ---- 4. Распорки делят остаток экрана -----------------------
+ * Базовая высота ноль, рост одинаковый: свободное место
+ * распределяется поровну сверху и снизу от изображения.
+ * Небольшой минимум оставлен, чтобы на коротком экране
+ * карточка не слиплась в сплошную полосу.
+ */
+.box-side.box-side {
+  height: auto !important;
+  max-height: none !important;
+  min-height: 8px !important;
+  flex: 1 1 0 !important;
+}
+
+/* ---- 5. Изображение: только поведение, не размер ------------
+ * Не растёт и не сжимается, стоит по центру. Ширину и высоту
+ * по-прежнему задаёт сама страница.
+ */
+.item-image-wipe.item-image-wipe,
+.item-image.item-image {
+  flex: 0 0 auto !important;
+  align-self: center !important;
+}
+
+/* ---- 6. Линии, из-за которых карточка похожа на таблицу ----- */
 .uni-card .uni-card__header,
 .uni-card .uni-card__actions,
 .uni-card .uni-card__content {
@@ -66,11 +134,8 @@
   border-bottom: none !important;
 }
 
-/* ---- 4. Room for the bar at the foot ----------------------
- * The cart bar and the collection bar are fixed over the page
- * rather than in it, so whatever sits last is partly hidden.
- * This keeps the action row clear of it.
- */
+/* Название и строка с ценой сохраняют свою высоту и не тянутся. */
+.uni-card .uni-card__header,
 .uni-card .uni-card__actions {
-  margin-bottom: 56px !important;
+  flex: 0 0 auto !important;
 }
