@@ -647,7 +647,7 @@ function buildCsv(study) {
 
     const line = [
       s.prolific_id, s.study, direction, s.condition,
-      orderList.length || '', totalQty || '', m.moves || '',
+      orderList.length || '', totalQty || '', m.total || '',
       m.forward, m.backward, m.total, m.moves, m.items,
       ...qList.map((q) => (answers.has(q) ? answers.get(q) : '')),
       ...dList.map((f) => (s.demographics ? s.demographics[f] : '')),
